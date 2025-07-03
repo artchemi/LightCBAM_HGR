@@ -1,9 +1,11 @@
 import os
 import sys
+import argparse
 import numpy as np
 import mlflow
 import mlflow.tensorflow
 import tensorflow as tf
+from keras_flops import get_flops
 from models import build_base_model
 from dataset import *
 
@@ -16,6 +18,12 @@ print(tf.config.list_physical_devices('GPU'))
 
 tf.get_logger().setLevel('INFO')
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Обучение модели классификации жестов')
+
+    parser.add_argument('--window_size', type=int, default=WINDOW_SIZE, help='Размер окна')
+
+    return parser.parse_args()
 
 def train_model(model: tf.keras.Sequential, epochs: int, X_train, y_train, X_valid, y_valid, batch_size: int=BATCH_SIZE, lr: float=INIT_LR,
                 decay_rate: float=0.9, save_path: str=SAVE_PATH, patience: int=PATIENCE):
@@ -68,37 +76,49 @@ def train_model(model: tf.keras.Sequential, epochs: int, X_train, y_train, X_val
     
 
 def main():
+    args = parse_args()
+
     mlflow.tensorflow.autolog()
 
     # NOTE: Извлечение всех данных из .mat файлов 
-    emg, label = folder_extract(FOLDAR_PATH, exercises=EXERCISES, myo_pref=MYO_PREF)
+    emg, label = folder_extract(FOLDER_PATH, exercises=EXERCISES, myo_pref=MYO_PREF)
 
     # Извлечение жестов из GESTURE_INDEXES
     emg = standarization(emg, STD_MEAN_PATH)
-    gest = gestures(emg, label, targets=GESTURE_INDEXES)
+    gest = gestures(emg, label, targets=GESTURE_INDEXES_MAIN)
     print(f'Выбранные жесты: {gest.keys()}')
 
     # NOTE: Разделение данных на выборки
     train_gestures, tmp_gest = train_test_split(gest, split_size=TEST_SIZE, rand_seed=GLOBAL_SEED)
     valid_gestures, test_gestures = train_test_split(tmp_gest, split_size=VALID_SIZE, rand_seed=GLOBAL_SEED)
     # print(len(train_gestures[26])) 
-    X_train, y_train = apply_window(train_gestures, window=WINDOW_SIZE, step=STEP_SIZE)
-    X_valid, y_valid = apply_window(valid_gestures, window=WINDOW_SIZE, step=STEP_SIZE)
-    X_test, y_test = apply_window(test_gestures, window=WINDOW_SIZE, step=STEP_SIZE)    # Вносить данные о выборках в mlflow 
+    X_train, y_train = apply_window(train_gestures, window=args.window_size, step=STEP_SIZE)
+    X_valid, y_valid = apply_window(valid_gestures, window=args.window_size, step=STEP_SIZE)
+    X_test, y_test = apply_window(test_gestures, window=args.window_size, step=STEP_SIZE)    # Вносить данные о выборках в mlflow 
 
-    X_train = np.transpose(X_train.reshape(-1, 8, WINDOW_SIZE, 1), (0, 2, 1, 3)).astype(np.float32)
-    X_valid = np.transpose(X_valid.reshape(-1, 8, WINDOW_SIZE, 1), (0, 2, 1, 3)).astype(np.float32)
-    X_test = np.transpose(X_test.reshape(-1, 8, WINDOW_SIZE, 1), (0, 2, 1, 3)).astype(np.float32)
+    X_train = np.transpose(X_train.reshape(-1, 8, args.window_size, 1), (0, 2, 1, 3))[:, :, CHANNELS, :].astype(np.float32)
+    X_valid = np.transpose(X_valid.reshape(-1, 8, args.window_size, 1), (0, 2, 1, 3))[:, :, CHANNELS, :].astype(np.float32)
+    X_test = np.transpose(X_test.reshape(-1, 8, args.window_size, 1), (0, 2, 1, 3))[:, :, CHANNELS, :].astype(np.float32)
 
-    model = build_base_model(input_shape=INPUT_SHAPE_BASE, filters=FILTERS_BASE, kernel_size=KERNEL_SIZE_BASE, 
+    input_shape = (args.window_size, INPUT_SHAPE_BASE[1], INPUT_SHAPE_BASE[2])
+    model = build_base_model(input_shape=input_shape, filters=FILTERS_BASE, kernel_size=KERNEL_SIZE_BASE, 
                              pool_size=POOL_SIZE_BASE, p_dropout=P_DROPOUT_BASE, num_classes=NUM_CLASSES) 
-    
+    mflops = get_flops(model, batch_size=1) / 1e6
+
+    mlflow.set_experiment("Gesture Classification Window Study")
     with mlflow.start_run():
         history = train_model(model=model, epochs=EPOCHS, X_train=X_train, y_train=y_train, X_valid=X_valid, y_valid=y_valid)
 
         test_loss, test_accuracy = model.evaluate(X_test, y_test)
         print(test_loss)
         print(test_accuracy)
+
+        # model.save_weights("checkpoints/model_weights.h5")
+
+        mlflow.log_param("window_size", args.window_size)
+        mlflow.log_param("gesture_indexes", GESTURE_INDEXES_MAIN)
+        mlflow.log_param("MFLOPs", mflops)
+        mlflow.log_metric("test_accuracy", test_accuracy)
 
 
 if __name__ == "__main__":
