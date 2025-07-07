@@ -2,5 +2,6 @@ __pycache__/
 .venv/
 mlruns/
 checkpoints/
+device_interface/
 
 *.json
