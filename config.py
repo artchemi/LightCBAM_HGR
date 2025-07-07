@@ -1,6 +1,6 @@
 # NOTE: Данные для обучения
 FOLDER_PATH = "Ninapro_DB5"
-STD_MEAN_PATH = "scaling_params.json"
+# STD_MEAN_PATH = "scaling_params.json"
 
 EXERCISES = ["E2", "E3"]
 MYO_PREF = "elbow"
