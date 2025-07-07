@@ -1,6 +1,7 @@
 import os
 import random
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 from sklearn.metrics import f1_score, confusion_matrix, classification_report
 
@@ -24,10 +25,17 @@ def set_seed(seed=42):
 
 def evaluate_metrics(model: tf.keras.Sequential, emg: np.ndarray, labels_true: np.ndarray):
 
-    labels_preds = model.predict(emg)
+    probs = model.predict(emg)
+    preds = np.argmax(probs, axis=-1)
 
-    f1_score_test = f1_score(labels_true, labels_preds, average='macro', zero_division=0)
-    classification_report_test = classification_report(labels_true, labels_preds, zero_division=0)
+    f1_score_test = f1_score(labels_true, preds, average='macro', zero_division=0)
 
-    return f1_score_test, classification_report_test
+    # ! Для сериализации !
+    report_test = classification_report(labels_true, preds, output_dict=True, zero_division=0)
+    cm_test = confusion_matrix(labels_true, preds)
+
+    labels_unique = np.unique(labels_true)
+    cm_df = pd.DataFrame(cm_test, index=labels_unique, columns=labels_unique)
+
+    return f1_score_test, report_test, cm_df
     
