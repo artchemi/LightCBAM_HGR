@@ -94,6 +94,9 @@ def main():
     X_train, y_train = apply_window(train_gestures, window=args.window_size, step=STEP_SIZE)
     X_valid, y_valid = apply_window(test_gestures, window=args.window_size, step=STEP_SIZE)
 
+    print(np.unique(y_train))
+    sys.exit()
+
     print('Train means: ', np.mean(X_train, axis=(0, 2)))
     print('Valid means: ', np.mean(X_valid, axis=(0, 2)))
 
@@ -110,18 +113,17 @@ def main():
     X_train, X_valid = reshape(X_train), reshape(X_valid)
     input_shape = (args.window_size, len(channels), 1)
 
-    # 7. Построение модели
-    if args.mode in ['base', 'reduced']:
-        model = build_base_model(input_shape, FILTERS_BASE, KERNEL_SIZE_BASE, POOL_SIZE_BASE, P_DROPOUT_BASE, NUM_CLASSES)
-        lr = INIT_LR
-    else:
-        model = build_SAM_model(input_shape, FILTERS_BASE, KERNEL_SIZE_BASE, POOL_SIZE_BASE, P_DROPOUT_BASE, NUM_CLASSES)
-        lr = 1e-2
-    mflops = get_flops(model, batch_size=1) / 1e6
-
-    # 8. Обучение и логирование
     kf = StratifiedKFold(n_splits=5)
     for fold, (tr_idx, val_idx) in enumerate(kf.split(X_train, y_train), 1):
+
+        if args.mode in ['base', 'reduced']:
+            model = build_base_model(input_shape, FILTERS_BASE, KERNEL_SIZE_BASE, POOL_SIZE_BASE, P_DROPOUT_BASE, NUM_CLASSES)
+            lr = INIT_LR
+        else:
+            model = build_SAM_model(input_shape, FILTERS_BASE, KERNEL_SIZE_BASE, POOL_SIZE_BASE, P_DROPOUT_BASE, NUM_CLASSES)
+            lr = 1e-2
+        mflops = get_flops(model, batch_size=1) / 1e6
+        
         print(f'=== Fold {fold} ===')
 
         Xt, yt = X_train[tr_idx], y_train[tr_idx]
