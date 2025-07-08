@@ -3,5 +3,6 @@ __pycache__/
 mlruns/
 checkpoints/
 device_interface/
+legacy/
 
 *.json
