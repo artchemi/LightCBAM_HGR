@@ -4,5 +4,4 @@ mlruns/
 checkpoints/
 device_interface/
 legacy/
-
-*.json
+normalization_values/
