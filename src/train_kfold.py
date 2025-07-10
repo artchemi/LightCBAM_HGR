@@ -31,6 +31,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('--window_size', type=int, default=WINDOW_SIZE)
     p.add_argument('--mode', type=str, default='base', choices=['base','reduced','attention'])
+    p.add_argument('--step_size', type=int, default=STEP_SIZE)    # Расстояние между окнами
     return p.parse_args()
 
 
