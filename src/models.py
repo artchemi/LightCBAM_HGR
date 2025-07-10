@@ -33,9 +33,67 @@ class SpatialAttention(tf.keras.layers.Layer):
         mask = self.conv(concat)                           # [batch, H, W, 1]
         return inputs * mask    # Элементное умножение
 
-def build_autoencoder(input_shape: tuple=INPUT_SHAPE_BASE, filters: tuple=FILTERS_BASE, kernel_size: tuple=KERNEL_SIZE_BASE, 
-                      pool_size: tuple=POOL_SIZE_BASE):
-    pass
+def build_autoencoder(input_shape: tuple = INPUT_SHAPE_BASE,
+                      filters: tuple = FILTERS_AE,
+                      kernel_size: tuple = KERNEL_SIZE_AE,
+                      pool_size: tuple = POOL_SIZE_AE):
+    inp = tf.keras.Input(shape=input_shape)
+
+    # --- ENCODER ---
+    x1 = tf.keras.layers.Conv2D(filters[0], kernel_size, padding='same')(inp)
+    x1 = tf.keras.layers.BatchNormalization()(x1)
+    x1 = tf.keras.layers.PReLU()(x1)
+    p1 = tf.keras.layers.MaxPooling2D(pool_size=pool_size, padding='same')(x1)
+
+    x2 = tf.keras.layers.Conv2D(filters[1], kernel_size, padding='same')(p1)
+    x2 = tf.keras.layers.BatchNormalization()(x2)
+    x2 = tf.keras.layers.PReLU()(x2)
+    x2 = SpatialAttention()(x2)
+    p2 = tf.keras.layers.MaxPooling2D(pool_size=pool_size, padding='same')(x2)
+
+    x3 = tf.keras.layers.Conv2D(filters[2], kernel_size, padding='same')(p2)
+    x3 = tf.keras.layers.BatchNormalization()(x3)
+    x3 = tf.keras.layers.PReLU()(x3)
+    x3 = SpatialAttention()(x3)
+    encoded = tf.keras.layers.MaxPooling2D(pool_size=pool_size, padding='same')(x3)
+
+    # --- DECODER via Conv2DTranspose ---
+    # 1) из encoded в размер x3
+    u1 = tf.keras.layers.Conv2DTranspose(
+        filters[2], kernel_size, strides=pool_size, padding='same'
+    )(encoded)
+    u1 = tf.keras.layers.BatchNormalization()(u1)
+    u1 = tf.keras.layers.PReLU()(u1)
+    c1 = tf.keras.layers.Concatenate()([u1, x3])
+
+    # 2) дальше в размер x2
+    u2 = tf.keras.layers.Conv2DTranspose(
+        filters[1], kernel_size, strides=pool_size, padding='same'
+    )(c1)
+    u2 = tf.keras.layers.BatchNormalization()(u2)
+    u2 = tf.keras.layers.PReLU()(u2)
+    u2 = SpatialAttention()(u2)
+    c2 = tf.keras.layers.Concatenate()([u2, x2])
+
+    # 3) дальше в размер x1
+    u3 = tf.keras.layers.Conv2DTranspose(
+        filters[0], kernel_size, strides=pool_size, padding='same'
+    )(c2)
+    u3 = tf.keras.layers.BatchNormalization()(u3)
+    u3 = tf.keras.layers.PReLU()(u3)
+    u3 = SpatialAttention()(u3)
+    c3 = tf.keras.layers.Concatenate()([u3, x1])
+
+    # выход
+    decoded = tf.keras.layers.Conv2D(1, (3, 3), activation='sigmoid', padding='same')(c3)
+
+    autoencoder = tf.keras.Model(inputs=inp, outputs=decoded)
+    autoencoder.compile(optimizer='adam', loss='mse')
+
+    encoder = tf.keras.Model(inputs=inp, outputs=encoded)
+    return autoencoder, encoder
+
+
 
 def build_base_model(input_shape: tuple=INPUT_SHAPE_BASE, filters: tuple=FILTERS_BASE, kernel_size: tuple=KERNEL_SIZE_BASE, 
                      pool_size: tuple=POOL_SIZE_BASE, p_dropout: float=P_DROPOUT_BASE, num_classes: int=NUM_CLASSES) -> tf.keras.Sequential:
@@ -52,11 +110,11 @@ def build_base_model(input_shape: tuple=INPUT_SHAPE_BASE, filters: tuple=FILTERS
     Returns:
         tf.keras.Sequentia: Модель TF.
     """
-    CNN1 = tf.keras.layers.Conv2D(filters=filters[0], strides=1,
-                                  kernel_size=kernel_size, activation='relu', padding='same')
+    CNN1 = tf.keras.layers.Conv2D(filters=filters[0], strides=1, kernel_size=kernel_size, 
+                                  activation='relu', padding='same')
     
-    CNN2 = tf.keras.layers.Conv2D(filters=filters[1], strides=1,
-                                  kernel_size=kernel_size, activation='relu', padding='same')
+    CNN2 = tf.keras.layers.Conv2D(filters=filters[1], strides=1, kernel_size=kernel_size, 
+                                  activation='relu', padding='same')
     
     model = tf.keras.Sequential([
         
