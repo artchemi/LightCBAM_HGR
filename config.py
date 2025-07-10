@@ -19,7 +19,7 @@ BATCH_SIZE = 384    # ???
 
 INIT_LR= 0.2
 
-WINDOW_SIZE = 56
+WINDOW_SIZE = 52
 STEP_SIZE = 16
 
 EPOCHS = 200
@@ -35,3 +35,9 @@ P_DROPOUT_BASE = 0.5
 # NOTE: Прочее
 GLOBAL_SEED = 42
 SAVE_PATH = "checkpoints/model"
+
+# ! Гиперпараметры автоэнкодера (AE)
+FILTERS_AE = (24, 16, 8)
+KERNEL_SIZE_AE = KERNEL_SIZE_BASE
+POOL_SIZE_AE = (2, 2)
+INIT_LR_AE = 1e-2
