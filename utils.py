@@ -1,9 +1,13 @@
 import os
+import sys 
 import random
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 from sklearn.metrics import f1_score, confusion_matrix, classification_report
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from config import *
 
 
 def set_seed(seed=42):
@@ -25,7 +29,7 @@ def set_seed(seed=42):
 
 def evaluate_metrics(model: tf.keras.Sequential, emg: np.ndarray, labels_true: np.ndarray):
 
-    probs = model.predict(emg)
+    probs = model.predict(emg, batch_size=BATCH_SIZE)
     preds = np.argmax(probs, axis=-1)
 
     f1_score_test = f1_score(labels_true, preds, average='macro', zero_division=0)

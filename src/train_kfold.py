@@ -143,7 +143,7 @@ def main():
             train_model(model, EPOCHS, X_train, yf_tr, X_valid, yf_vl, batch_size=BATCH_SIZE, lr=lr, save_path=save_w)
             # Инференс
             model.load_weights(save_w)
-            _, val_acc = model.evaluate(X_valid, yf_vl, verbose=0)
+            _, val_acc = model.evaluate(X_valid, yf_vl, batch_size=BATCH_SIZE, verbose=0)
             f1, report_dict, cm_df = evaluate_metrics(model, X_valid, yf_vl)
 
             mlflow.log_metric('valid_accuracy', float(val_acc))
