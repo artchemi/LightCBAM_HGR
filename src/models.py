@@ -33,66 +33,52 @@ class SpatialAttention(tf.keras.layers.Layer):
         mask = self.conv(concat)                           # [batch, H, W, 1]
         return inputs * mask    # Элементное умножение
 
-def build_autoencoder(input_shape: tuple = INPUT_SHAPE_BASE,
-                      filters: tuple = FILTERS_AE,
-                      kernel_size: tuple = KERNEL_SIZE_AE,
-                      pool_size: tuple = POOL_SIZE_AE):
-    inp = tf.keras.Input(shape=input_shape)
 
-    # --- ENCODER ---
-    x1 = tf.keras.layers.Conv2D(filters[0], kernel_size, padding='same')(inp)
-    x1 = tf.keras.layers.BatchNormalization()(x1)
-    x1 = tf.keras.layers.PReLU()(x1)
-    p1 = tf.keras.layers.MaxPooling2D(pool_size=pool_size, padding='same')(x1)
+class ChannelAttention(tf.keras.layers.Layer):
+    def __init__(self, reduction_ratio=4, **kwargs):
+        super(ChannelAttention, self).__init__(**kwargs)
+        self.reduction_ratio = reduction_ratio
 
-    x2 = tf.keras.layers.Conv2D(filters[1], kernel_size, padding='same')(p1)
-    x2 = tf.keras.layers.BatchNormalization()(x2)
-    x2 = tf.keras.layers.PReLU()(x2)
-    x2 = SpatialAttention()(x2)
-    p2 = tf.keras.layers.MaxPooling2D(pool_size=pool_size, padding='same')(x2)
+    def build(self, input_shape):
+        _, time_steps, channels = input_shape
+        reduced_channels = max(1, channels // self.reduction_ratio)
 
-    x3 = tf.keras.layers.Conv2D(filters[2], kernel_size, padding='same')(p2)
-    x3 = tf.keras.layers.BatchNormalization()(x3)
-    x3 = tf.keras.layers.PReLU()(x3)
-    x3 = SpatialAttention()(x3)
-    encoded = tf.keras.layers.MaxPooling2D(pool_size=pool_size, padding='same')(x3)
+        self.shared_dense_one = tf.keras.layers.Dense(
+            units=reduced_channels,
+            activation='relu',
+            kernel_initializer='he_normal',
+            use_bias=True
+        )
+        self.shared_dense_two = tf.keras.layers.Dense(
+            units=channels,
+            activation='sigmoid',
+            kernel_initializer='he_normal',
+            use_bias=True
+        )
+        super(ChannelAttention, self).build(input_shape)
 
-    # --- DECODER via Conv2DTranspose ---
-    # 1) из encoded в размер x3
-    u1 = tf.keras.layers.Conv2DTranspose(
-        filters[2], kernel_size, strides=pool_size, padding='same'
-    )(encoded)
-    u1 = tf.keras.layers.BatchNormalization()(u1)
-    u1 = tf.keras.layers.PReLU()(u1)
-    c1 = tf.keras.layers.Concatenate()([u1, x3])
+    def call(self, inputs, return_attention=False):
+        # inputs: [batch, time, channels]
+        avg_pool = tf.reduce_mean(inputs, axis=1)
+        max_pool = tf.reduce_max(inputs, axis=1)
 
-    # 2) дальше в размер x2
-    u2 = tf.keras.layers.Conv2DTranspose(
-        filters[1], kernel_size, strides=pool_size, padding='same'
-    )(c1)
-    u2 = tf.keras.layers.BatchNormalization()(u2)
-    u2 = tf.keras.layers.PReLU()(u2)
-    u2 = SpatialAttention()(u2)
-    c2 = tf.keras.layers.Concatenate()([u2, x2])
+        avg_out = self.shared_dense_one(avg_pool)
+        avg_out = self.shared_dense_two(avg_out)
 
-    # 3) дальше в размер x1
-    u3 = tf.keras.layers.Conv2DTranspose(
-        filters[0], kernel_size, strides=pool_size, padding='same'
-    )(c2)
-    u3 = tf.keras.layers.BatchNormalization()(u3)
-    u3 = tf.keras.layers.PReLU()(u3)
-    u3 = SpatialAttention()(u3)
-    c3 = tf.keras.layers.Concatenate()([u3, x1])
+        max_out = self.shared_dense_one(max_pool)
+        max_out = self.shared_dense_two(max_out)
 
-    # выход
-    decoded = tf.keras.layers.Conv2D(1, (3, 3), activation='sigmoid', padding='same')(c3)
+        attention = tf.nn.sigmoid(avg_out + max_out)  # [batch, channels]
+        attention = tf.expand_dims(attention, axis=1)  # [batch, 1, channels]
 
-    autoencoder = tf.keras.Model(inputs=inp, outputs=decoded)
-    autoencoder.compile(optimizer='adam', loss='mse')
+        output = inputs * attention  # broadcasting
+        if return_attention:
+            return output, attention
+        else:
+            return output
 
-    encoder = tf.keras.Model(inputs=inp, outputs=encoded)
-    return autoencoder, encoder
-
+# Пример использования при 8 входных каналах:
+# model.add(ChannelAttention(reduction_ratio=4))
 
 
 def build_base_model(input_shape: tuple=INPUT_SHAPE_BASE, filters: tuple=FILTERS_BASE, kernel_size: tuple=KERNEL_SIZE_BASE, 
@@ -110,11 +96,9 @@ def build_base_model(input_shape: tuple=INPUT_SHAPE_BASE, filters: tuple=FILTERS
     Returns:
         tf.keras.Sequentia: Модель TF.
     """
-    CNN1 = tf.keras.layers.Conv2D(filters=filters[0], strides=1, kernel_size=kernel_size, 
-                                  activation='relu', padding='same')
+    CNN1 = tf.keras.layers.Conv2D(filters=filters[0], strides=1, kernel_size=kernel_size, padding='same')
     
-    CNN2 = tf.keras.layers.Conv2D(filters=filters[1], strides=1, kernel_size=kernel_size, 
-                                  activation='relu', padding='same')
+    CNN2 = tf.keras.layers.Conv2D(filters=filters[1], strides=1, kernel_size=kernel_size, padding='same')
     
     model = tf.keras.Sequential([
         
@@ -156,10 +140,10 @@ def build_SAM_model(input_shape: tuple=INPUT_SHAPE_BASE, filters: tuple=FILTERS_
     """
     
     CNN1 = tf.keras.layers.Conv2D(filters=filters[0], strides=1,
-                                  kernel_size=kernel_size, activation='relu', padding='same')
+                                  kernel_size=kernel_size, padding='same')
     
     CNN2 = tf.keras.layers.Conv2D(filters=filters[1], strides=1,
-                                  kernel_size=kernel_size, activation='relu', padding='same')
+                                  kernel_size=kernel_size, padding='same')
     
     inputs = tf.keras.Input(shape=input_shape)
     x = CNN1(inputs)
@@ -183,6 +167,52 @@ def build_SAM_model(input_shape: tuple=INPUT_SHAPE_BASE, filters: tuple=FILTERS_
 
     return tf.keras.Model(inputs=inputs, outputs=outputs)
 
+
+def build_CAM_model_1D(input_shape: tuple, filters: tuple=FILTERS_BASE, kernel_size: int=KERNEL_SIZE_BASE_1D,pool_size: int=POOL_SIZE_BASE_1D,
+                       p_dropout: float=P_DROPOUT_BASE,num_classes: int=NUM_CLASSES, return_attention_mask: bool = False) -> tf.keras.Model:
+    
+    inputs = tf.keras.Input(shape=input_shape)  # (T, C)
+
+    # Канальное внимание на входе
+    ca_layer = ChannelAttention(reduction_ratio=max(1, input_shape[-1] // 4))
+    
+    if return_attention_mask:
+        x, attention = ca_layer(inputs, return_attention=True)
+    else:
+        x = ca_layer(inputs)
+
+    # Первый 1D‑свёрточный блок
+    x = tf.keras.layers.Conv1D(filters=filters[0], kernel_size=kernel_size, strides=1, padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.PReLU()(x)
+    x = tf.keras.layers.SpatialDropout1D(rate=p_dropout)(x)
+    x = tf.keras.layers.MaxPool1D(pool_size=pool_size, padding='same')(x)
+
+    # Второй 1D‑свёрточный блок
+    x = tf.keras.layers.Conv1D(filters=filters[1], kernel_size=kernel_size, strides=1, padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.PReLU()(x)
+    x = tf.keras.layers.SpatialDropout1D(rate=p_dropout)(x)
+    x = tf.keras.layers.MaxPool1D(pool_size=pool_size, padding='same')(x)
+
+    # Классификатор
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(num_classes)(x)
+    outputs = tf.keras.layers.Softmax(axis=-1)(x)
+
+    if return_attention_mask:
+        return tf.keras.Model(inputs=inputs, outputs=[outputs, attention])
+    else:
+        return tf.keras.Model(inputs=inputs, outputs=outputs)
+
+
+# Пример настройки констант:
+# INPUT_SHAPE_BASE_1D = (56, 8)            # 56 отсчётов, 8 каналов
+# KERNEL_SIZE_BASE_1D = 3                  # ширина ядра 3
+# POOL_SIZE_BASE_1D = 2                    # пулинг длиной 2
+# FILTERS_BASE = (64, 64)                  # два блока по 64 фильтра
+# P_DROPOUT_BASE = 0.5
+# NUM_CLASSES = 10
 
 def main():
     pass
