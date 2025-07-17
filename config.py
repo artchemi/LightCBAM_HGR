@@ -32,6 +32,11 @@ KERNEL_SIZE_BASE = (1, 3)    # (3, 3)
 POOL_SIZE_BASE = (1, 2)
 P_DROPOUT_BASE = 0.5
 
+# NOTE: Параметры 1D свертки
+INPUT_SHAPE_BASE_1D = (1, 8, WINDOW_SIZE)
+KERNEL_SIZE_BASE_1D = 3
+POOL_SIZE_BASE_1D = 2
+
 # NOTE: Прочее
 GLOBAL_SEED = 42
 SAVE_PATH = "checkpoints/model"
