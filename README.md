@@ -123,12 +123,20 @@ Training is performed using the **categorical cross-entropy loss** and the **Ada
 
 ```markdown
 
-ADD    # new features
-FIX    # bugs
-UPDATE    # update current features
-REMOVE    # delete code or features
-REFACTOR    #change code without functional behavour
-DOCS    # change documentation
-MINOR 
+feat: new feature
+
+fix: bugs
+
+docs: documentation, description
+
+refactor: refactoring
+
+chore: dependency update, build
 
 ```
+
+## License
+
+This project is licensed under the terms of the GNU General Public License v3.0 (GPLv3).  
+You are free to use, modify, and distribute this code, but any derivative work must also be open-sourced under the same license.  
+See the [LICENSE](./LICENSE) file for full license text.
