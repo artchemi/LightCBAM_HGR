@@ -30,7 +30,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('--window_size', type=int, default=WINDOW_SIZE)
-    p.add_argument('--mode', type=str, default='base', choices=['base','reduced','attention'])
+    p.add_argument('--model', type=str, default='base', choices=['base', 'attention'])
+    p.add_argument('--channels', type=str, default='full', choices=['full', 'reduced'])
     p.add_argument('--step_size', type=int, default=STEP_SIZE)    # Расстояние между окнами
     return p.parse_args()
 
@@ -73,7 +74,7 @@ def train_model(model: tf.keras.Sequential, epochs: int, X_train: np.ndarray, y_
 def main():
     args = parse_args()
     mlflow.tensorflow.autolog()
-    mlflow.set_experiment(f"Win{args.window_size}|{args.mode}")
+    mlflow.set_experiment(f"Win{args.window_size}|{args.model}|{args.channels}")
 
     # Сырые сигналы и метки
     emg, label = folder_extract(FOLDER_PATH, exercises=EXERCISES, myo_pref=MYO_PREF)
@@ -87,7 +88,7 @@ def main():
     X_test_raw,  y_test  = apply_window(test_g,  window=args.window_size, step=STEP_SIZE)
 
     # Каналы для режима и форма входа
-    channels = [0,3,4,5,6] if args.mode=='reduced' else list(range(8))
+    channels = CHANNELS if args.channels == 'reduced' else list(range(8))
     input_shape = (args.window_size, len(channels), 1)
 
     # Папка для сохранения параметров стандартизации
@@ -106,7 +107,7 @@ def main():
 
         # Сохраняем эти параметры в JSON
         params = {'mean': means.tolist(), 'std':  stds.tolist()}
-        norm_file = f'normalization_values/fold{fold_idx}_win{args.window_size}_{args.mode}.json'
+        norm_file = f'normalization_values/fold{fold_idx}_win{args.window_size}_{args.model}_{args.channels}.json'
         with open(norm_file, 'w') as f:
             json.dump(params, f)
 
@@ -127,7 +128,7 @@ def main():
         X_valid = prepare(Xs_vl)
 
         # Выбор модели
-        if args.mode in ('base','reduced'):
+        if args.model == 'base':
             model = build_base_model(input_shape, FILTERS_BASE, KERNEL_SIZE_BASE, POOL_SIZE_BASE, P_DROPOUT_BASE, NUM_CLASSES)
             lr = INIT_LR
         else:
@@ -137,7 +138,7 @@ def main():
         mflops = get_flops(model, batch_size=1) / 1e6
         print(f"Model MFLOPS: {mflops:.2f}")
 
-        save_w = SAVE_PATH + f'_fold{fold_idx}_{args.window_size}_{args.mode}.h5'
+        save_w = SAVE_PATH + f'_fold{fold_idx}_{args.window_size}_{args.model}_{args.channels}.h5'
         with mlflow.start_run(run_name=f'fold_{fold_idx}'):
             # Обучение
             train_model(model, EPOCHS, X_train, yf_tr, X_valid, yf_vl, batch_size=BATCH_SIZE, lr=lr, save_path=save_w)
@@ -156,6 +157,7 @@ def main():
                 mlflow.log_artifact(tmp.name, 'confusion_matrix')
             mlflow.log_dict(report_dict, 'classification_report_valid.json')
             mlflow.log_param('gesture_indexes', GESTURE_INDEXES_MAIN)
+            mlflow.log_param('channels', channels)
 
         tf.keras.backend.clear_session()
 
