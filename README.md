@@ -99,7 +99,7 @@ There are 9 gestures and 10 subjects in dataset for training. The set of the ges
 
 ![gestures](reports/gestures.png)
 
-## 📦 Model
+## 📦 Models
 
 The model is a lightweight 2D convolutional neural network designed for classifying surface EMG signals into predefined hand gestures.
 
@@ -111,13 +111,13 @@ The final classification layer outputs softmax probabilities across the gesture 
 
 Training is performed using the **categorical cross-entropy loss** and the **Adam optimizer**, with real-time logging via MLflow.
 
-### Structure
+Moreover, there is **Channel Attention Module (CAM)** implemented in baseline. The main goal of CAM is the analysis of the channel importance.
 
-- **Base model**: Convolutional block `ConvBlock` consists of `Conv2d() →  BatchNorm2d(...) → PReLU → Dropout2d(...) → MaxPool2d(...)`.
+### Structures
 
-- **Attention model**: $M_s(F) = σ(Conv3x3([AvgPool(F); MaxPool(F)]))$.
+![model_SAM](reports/LightSAM_1.png)
 
-![model](reports/LightSAM_1.png)
+![model_SAM](reports/LightCAM_1.png)
 
 ## Commits description
 
