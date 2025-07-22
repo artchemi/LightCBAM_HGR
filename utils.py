@@ -34,8 +34,11 @@ def evaluate_metrics(model: tf.keras.Sequential, emg: np.ndarray, labels_true: n
 
     probs = model.predict(emg, batch_size=BATCH_SIZE)
 
-    if (type(probs) == tuple) | (type(probs) == list):
-        probs = probs[0]
+    # if (type(probs) == tuple) | (type(probs) == list):
+    #     probs = probs[0]
+    
+    if isinstance(probs, dict):
+        probs = probs['softmax']
 
     preds = np.argmax(probs, axis=-1)
 

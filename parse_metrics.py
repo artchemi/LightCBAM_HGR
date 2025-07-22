@@ -51,9 +51,9 @@ if __name__ == "__main__":
     metrics_dict['window_size'] = window_sizes
 
     for i in window_sizes:
-        df_accuracy, _ = average_metric_for_experiment(f"Win{i} | {model}", col_name_accuracy)
-        df_f1, _ = average_metric_for_experiment(f"Win{i} | {model}", col_name_f1)
-        df_complexity, _ = average_metric_for_experiment(f"Win{i} | {model}", col_name_complexity)
+        df_accuracy, _ = average_metric_for_experiment(f"Win{i}|{model}|reduced", col_name_accuracy)
+        df_f1, _ = average_metric_for_experiment(f"Win{i}|{model}|reduced", col_name_f1)
+        df_complexity, _ = average_metric_for_experiment(f"Win{i}|{model}|reduced", col_name_complexity)
 
         metrics_dict['accuracy_mean'].append(df_accuracy[col_name_accuracy].mean() * 100)
         metrics_dict['accuracy_std'].append(df_accuracy[col_name_accuracy].std() * 100)
