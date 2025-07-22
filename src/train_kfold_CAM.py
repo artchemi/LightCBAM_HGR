@@ -30,6 +30,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('--window_size', type=int, default=WINDOW_SIZE)
+    p.add_argument('--channels', type=str, default='full', choices=['full', 'reduced'])
     return p.parse_args()
 
 
@@ -56,22 +57,24 @@ def train_model(model: tf.keras.Sequential, epochs: int, X_train: np.ndarray, y_
     callbacks = [tf.keras.callbacks.EarlyStopping('val_loss', mode='min', patience=patience)]
     if save_path:
         callbacks.append(
-            tf.keras.callbacks.ModelCheckpoint(save_path, monitor='val_loss', save_best_only=True, 
+            tf.keras.callbacks.ModelCheckpoint(save_path, monitor='val_softmax_loss', save_best_only=True, 
                                                save_weights_only=True, mode='min', verbose=1)
                                                )
 
     steps = int((len(X_train) / batch_size) * 1.5)
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(lr, decay_steps=steps, decay_rate=decay_rate)
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule), loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule), 
+                  loss={"softmax": "sparse_categorical_crossentropy", "attention": None},
+                  metrics={"softmax": "accuracy"}
+                  )
 
-    return model.fit(X_train, y_train, validation_data=(X_valid, y_valid), epochs=epochs, 
-                     batch_size=batch_size, callbacks=callbacks, verbose=1)
+    return model.fit(X_train, y_train, validation_data=(X_valid, y_valid), epochs=epochs, batch_size=batch_size, callbacks=callbacks, verbose=1)
 
 
 def main():
     args = parse_args()
     mlflow.tensorflow.autolog()
-    mlflow.set_experiment(f"Win{args.window_size} | CAM")
+    mlflow.set_experiment(f"Win{args.window_size}|CAM|{args.channels}")
 
     # Сырые сигналы и метки
     emg, label = folder_extract(FOLDER_PATH, exercises=EXERCISES, myo_pref=MYO_PREF)
@@ -85,7 +88,8 @@ def main():
     X_test_raw,  y_test  = apply_window(test_g,  window=args.window_size, step=STEP_SIZE)
 
     # Каналы для режима и форма входа
-    input_shape = (args.window_size, 8)
+    channels = CHANNELS if args.channels == 'reduced' else list(range(8))
+    input_shape = (args.window_size, len(channels))
 
     # Папка для сохранения параметров стандартизации
     os.makedirs('normalization_values', exist_ok=True)
@@ -106,7 +110,7 @@ def main():
 
         # Сохраняем эти параметры в JSON
         params = {'mean': means.tolist(), 'std':  stds.tolist()}
-        norm_file = f'normalization_values/fold{fold_idx}_win{args.window_size}_CAM.json'
+        norm_file = f'normalization_values/fold{fold_idx}_win{args.window_size}_{channels}_CAM.json'
         with open(norm_file, 'w') as f:
             json.dump(params, f)
 
@@ -120,6 +124,7 @@ def main():
         # Переводим в [N, window, channels, 1]
         def prepare(X):
             Xt = np.transpose(X, (0, 2, 1))   # [N, window, channels]
+            Xt = Xt[..., channels]   
             return Xt.astype(np.float32)
 
         X_train = prepare(Xs_tr)
@@ -131,20 +136,20 @@ def main():
         mflops = get_flops(model, batch_size=1) / 1e6
         print(f"Model MFLOPS: {mflops:.2f}")
 
-        save_w = SAVE_PATH + f'_fold{fold_idx}_{args.window_size}_CAM.h5'
+        save_w = SAVE_PATH + f'_fold{fold_idx}_{args.window_size}_{args.channels}_CAM.h5'
         with mlflow.start_run(run_name=f'fold_{fold_idx}'):
             # Обучение
             train_model(model, EPOCHS, X_train, yf_tr, X_valid, yf_vl, batch_size=BATCH_SIZE, lr=lr, save_path=save_w)
             # Инференс
             model.load_weights(save_w)
-            val_acc = model.evaluate(X_valid, yf_vl, batch_size=BATCH_SIZE, verbose=0)[3]
+            val_acc = model.evaluate(X_valid, yf_vl, batch_size=BATCH_SIZE, verbose=0)[2]
             f1, report_dict, cm_df = evaluate_metrics(model, X_valid, yf_vl)
 
             mlflow.log_metric('valid_accuracy', float(val_acc))
             mlflow.log_metric('valid_f1', float(f1))
             mlflow.log_metric('complexity_mflops', float(mflops))
 
-            attention_masks = model.predict(X_valid)[1]
+            attention_masks = model.predict(X_valid)['attention']
 
             masks_mean = []
             masks_stds = []
@@ -154,8 +159,8 @@ def main():
                 masks_mean.append(attention_masks_gest.mean(axis=(0, 1)))
                 masks_stds.append(attention_masks_gest.std(axis=(0, 1)))
 
-            np.save(f'attention_masks/mask_{args.window_size}_fold{fold_idx}.npy', np.array(masks_mean))
-            np.save(f'attention_masks/mask_std_{args.window_size}_fold{fold_idx}.npy', np.array(masks_stds))
+            np.save(f'attention_masks/mask_{args.window_size}_fold{fold_idx}_{args.channels}.npy', np.array(masks_mean))
+            np.save(f'attention_masks/mask_std_{args.window_size}_fold{fold_idx}_{args.channels}.npy', np.array(masks_stds))
 
             # Сохранение матрицы ошибок и отчета
             with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as tmp:
@@ -163,6 +168,7 @@ def main():
                 mlflow.log_artifact(tmp.name, 'confusion_matrix')
             mlflow.log_dict(report_dict, 'classification_report_valid.json')
             mlflow.log_param('gesture_indexes', GESTURE_INDEXES_MAIN)
+            mlflow.log_param('channels', channels)
 
         tf.keras.backend.clear_session()
 

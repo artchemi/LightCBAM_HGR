@@ -201,7 +201,7 @@ def build_CAM_model_1D(input_shape: tuple, filters: tuple=FILTERS_BASE, kernel_s
     outputs = tf.keras.layers.Softmax(axis=-1)(x)
 
     if return_attention_mask:
-        return tf.keras.Model(inputs=inputs, outputs=[outputs, attention])
+        return tf.keras.Model(inputs=inputs, outputs={"softmax": outputs, "attention": attention})
     else:
         return tf.keras.Model(inputs=inputs, outputs=outputs)
 
