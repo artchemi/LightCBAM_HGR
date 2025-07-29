@@ -123,6 +123,8 @@ Moreover, there is **Channel Attention Module (CAM)** implemented in baseline. T
 
 ```markdown
 
+add: new function/model
+
 feat: new feature
 
 fix: bugs
@@ -132,6 +134,8 @@ docs: documentation, description
 refactor: refactoring
 
 chore: dependency update, build
+
+minor
 
 ```
 
