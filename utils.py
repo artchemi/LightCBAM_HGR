@@ -30,9 +30,9 @@ def set_seed(seed=42):
         pass
 
 
-def evaluate_metrics(model: tf.keras.Sequential, emg: np.ndarray, labels_true: np.ndarray):
+def evaluate_metrics(model: tf.keras.Sequential, emg: np.ndarray, labels_true: np.ndarray, batch_size: int=BATCH_SIZE):
 
-    probs = model.predict(emg, batch_size=BATCH_SIZE)
+    probs = model.predict(emg, batch_size=batch_size)
 
     # if (type(probs) == tuple) | (type(probs) == list):
     #     probs = probs[0]
