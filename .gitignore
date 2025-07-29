@@ -6,3 +6,5 @@ device_interface/
 legacy/
 normalization_values/
 attention_masks/
+
+*.zip
