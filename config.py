@@ -15,7 +15,7 @@ NUM_CLASSES = len(GESTURE_INDEXES_MAIN)
 
 VALID_SIZE = 0.5    # Доля от test
 TEST_SIZE = 0.3    # Доля от общей выборки
-BATCH_SIZE = 384    # ???
+BATCH_SIZE = 256    # ???
 
 INIT_LR= 0.2
 
