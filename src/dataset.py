@@ -98,6 +98,77 @@ def folder_extract(root_dir, exercises=["E2"], myo_pref="elbow"):
     return np.array(emg), np.array(emg_label)
 
 
+def folder_imu_extract(root_dir, exercises=["E2"], myo_pref="elbow"):
+    """Извлечение ЭМГ сигналов и данных с акселерометра
+
+    Args:
+        root_dir (_type_): _description_
+        exercises (list, optional): _description_. Defaults to ["E2"].
+        myo_pref (str, optional): _description_. Defaults to "elbow".
+
+    Returns:
+        _type_: _description_
+    """
+    
+    emg = []
+    imu = []
+    emg_label = []
+    
+    # Parse through sub folders underneath 'root_dir'(from args)
+    for folder in os.listdir(root_dir):
+        subfolder_dir = root_dir + "/" + folder
+        # Parse through .mat files underneath sub folders
+        for file in os.listdir(subfolder_dir):
+            # Get sEMG signals of dedicated Myo armband and Exercise
+            if file.split("_")[1] in exercises:
+                file_path = subfolder_dir + "/" + file
+                # Read .mat file
+                mat = scipy.io.loadmat(file_path)
+                
+                # Get first 8 Myo sensors/channels closest to elbow
+                if myo_pref == "elbow":
+                    emg += [sensors[:8] for sensors in mat["emg"]]
+                    imu += [sensors for sensors in mat["acc"]]
+                # Get last 8 Myo sensors/channels closest to wrist
+                elif myo_pref == "wrist":
+                    emg += [sensors[8:] for sensors in mat["emg"]]
+                # Get all 16 Myo sensors/channels
+                else:
+                    emg += mat["emg"]
+                
+                current_exercise = file.split("_")[1]
+                
+                if current_exercise == "E2":
+                    labels = mat["stimulus"].reshape(-1)
+                    new_labels = []
+                    
+                    for label in labels:
+                        if label != 0:
+                            new_labels.append(label + 12)
+                        else:
+                            new_labels.append(0)
+                    
+                    emg_label.extend(new_labels)
+                
+                elif current_exercise == "E3":
+                    labels = mat["stimulus"].reshape(-1)
+                    new_labels = []
+                    
+                    for label in labels:
+                        if label != 0:
+                            new_labels.append(label + 29)
+                        else:
+                            new_labels.append(0)
+                    
+                    emg_label.extend(new_labels)
+                
+                else:
+                    # Collect corresponding labels
+                    emg_label.extend(mat["stimulus"].reshape(-1))
+    
+    return np.array(emg), np.array(imu), np.array(emg_label)
+
+
 def standarization(emg, save_path=None):
     """
     Purpose:
