@@ -46,10 +46,11 @@ def evaluate_metrics(model: tf.keras.Sequential, emg: np.ndarray, labels_true: n
 
     # ! Для сериализации !
     report_test = classification_report(labels_true, preds, output_dict=True, zero_division=0)
-    cm_test = confusion_matrix(labels_true, preds)
+    all_labels = np.unique(np.concatenate([labels_true, preds]))
+    cm_test = confusion_matrix(labels_true, preds, labels=all_labels)
 
-    labels_unique = np.unique(labels_true)
-    cm_df = pd.DataFrame(cm_test, index=labels_unique, columns=labels_unique)
+    # labels_unique = np.unique(labels_true)
+    cm_df = pd.DataFrame(cm_test, index=all_labels, columns=all_labels)
 
     return f1_score_test, report_test, cm_df
 

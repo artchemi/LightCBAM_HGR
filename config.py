@@ -1,5 +1,5 @@
 # NOTE: Данные для обучения
-FOLDER_PATH = "Ninapro_DB5"
+FOLDER_PATH = "Ninapro_DB3"
 # STD_MEAN_PATH = "scaling_params.json"
 
 EXERCISES = ["E2", "E3"]
@@ -10,14 +10,17 @@ MYO_PREF = "elbow"
 GESTURE_INDEXES_B = [0, 13, 15, 18, 19]
 GESTURE_INDEXES_C = [34, 38, 43, 46]
 GESTURE_INDEXES_MAIN = GESTURE_INDEXES_B + GESTURE_INDEXES_C
-CHANNELS = [2, 4, 5, 6, 7]    # NOTE: CAM-MS-RS - [0, 3, 4, 5, 6]
+
+COM_PORTS = ["COM3", "COM4", "COM27", "COM7", "COM8"]    # Названия COM-портов, к которым были подключены электроды
+
+CHANNELS = [0, 1, 2, 3, 4]    # NOTE: CAM-MS-RS - [0, 3, 4, 5, 6]
 NUM_CLASSES = len(GESTURE_INDEXES_MAIN)
 
 VALID_SIZE = 0.5    # Доля от test
 TEST_SIZE = 0.3    # Доля от общей выборки
-BATCH_SIZE = 256    # ???
+BATCH_SIZE = 32    # ???
 
-INIT_LR= 0.2
+INIT_LR= 0.1
 
 WINDOW_SIZE = 52
 STEP_SIZE = 16
@@ -40,9 +43,3 @@ POOL_SIZE_BASE_1D = 2
 # NOTE: Прочее
 GLOBAL_SEED = 42
 SAVE_PATH = "checkpoints/model"
-
-# ! Гиперпараметры автоэнкодера (AE)
-FILTERS_AE = (24, 16, 8)
-KERNEL_SIZE_AE = KERNEL_SIZE_BASE
-POOL_SIZE_AE = (2, 2)
-INIT_LR_AE = 1e-2

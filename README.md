@@ -115,9 +115,7 @@ Moreover, there is **Channel Attention Module (CAM)** implemented in baseline. T
 
 ### Structures
 
-![model_SAM](reports/LightSAM_1.png)
-
-![model_SAM](reports/LightCAM_1.png)
+![model_SAM](reports/models.png)
 
 ## Commits description
 

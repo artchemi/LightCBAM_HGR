@@ -1,4 +1,5 @@
 import os
+import gc
 import sys
 import argparse
 import numpy as np
@@ -13,7 +14,7 @@ from keras_flops import get_flops
 # Корень проекта
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models import build_CAM_model_1D
-from dataset import folder_extract, gestures, train_test_split, apply_window
+from dataset import recordings_extract, data2gestdict, train_test_split, apply_window
 from config import *
 from utils import set_seed, evaluate_metrics
 
@@ -68,36 +69,28 @@ def train_model(model: tf.keras.Sequential, epochs: int, X_train: np.ndarray, y_
                   metrics={"softmax": "accuracy"}
                   )
 
-    return model.fit(X_train, y_train, validation_data=(X_valid, y_valid), epochs=epochs, batch_size=batch_size, callbacks=callbacks, verbose=1)
+    model.fit(X_train, y_train, validation_data=(X_valid, y_valid), epochs=epochs, batch_size=batch_size, callbacks=callbacks, verbose=1)
+    return None
 
 
 def main():
     args = parse_args()
     mlflow.tensorflow.autolog()
-    mlflow.set_experiment(f"Win{args.window_size}|CAM|{args.channels}")
+    mlflow.set_experiment(f"Win{args.window_size}|CAM")
 
-    # Сырые сигналы и метки
-    emg, label = folder_extract(FOLDER_PATH, exercises=EXERCISES, myo_pref=MYO_PREF)
-    all_g = gestures(emg, label, targets=GESTURE_INDEXES_MAIN)
+    emgs, labels = recordings_extract(root_dir="dataset_unified/", subjects=["S1", "S2", "S3", "S4", "S5"],
+                                      trials=["2", "3"])  
+    gestures = data2gestdict(emgs, labels)
+    train_g, _ = train_test_split(gestures=gestures, split_size=0.2)    # Разделение данных 
+    X_train_raw, y_train = apply_window(train_g, window=args.window_size, step=STEP_SIZE * 10)    # Преобразование в окна: [N, channels, window]
 
-    # Train/Test split по жестам
-    train_g, test_g = train_test_split(all_g, split_size=0.0, rand_seed=GLOBAL_SEED)
-
-    # Преобразование в окна: [N, channels, window]
-    X_train_raw, y_train = apply_window(train_g, window=args.window_size, step=STEP_SIZE)
-    X_test_raw,  y_test  = apply_window(test_g,  window=args.window_size, step=STEP_SIZE)
-
-    # Каналы для режима и форма входа
-    channels = CHANNELS if args.channels == 'reduced' else list(range(8))
+    channels = CHANNELS    # FIXME
     input_shape = (args.window_size, len(channels))
 
-    # Папка для сохранения параметров стандартизации
-    os.makedirs('normalization_values', exist_ok=True)
+    os.makedirs('normalization_values', exist_ok=True)    # Папка для сохранения параметров стандартизации
+    os.makedirs('attention_masks', exist_ok=True)         # Папка для масок внимания
 
-    # Папка для масок внимания
-    os.makedirs('attention_masks', exist_ok=True)
-
-    # Кросс-валидация по фолдам
+    # ! Кросс-валидация по фолдам
     kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=GLOBAL_SEED)
     for fold_idx, (idx_tr, idx_vl) in enumerate(kf.split(X_train_raw, y_train), start=1):
         print(f"\n=== Fold {fold_idx} ===")
@@ -124,7 +117,7 @@ def main():
         # Переводим в [N, window, channels, 1]
         def prepare(X):
             Xt = np.transpose(X, (0, 2, 1))   # [N, window, channels]
-            Xt = Xt[..., channels]   
+            # Xt = Xt[..., channels]   
             return Xt.astype(np.float32)
 
         X_train = prepare(Xs_tr)
@@ -149,18 +142,18 @@ def main():
             mlflow.log_metric('valid_f1', float(f1))
             mlflow.log_metric('complexity_mflops', float(mflops))
 
-            attention_masks = model.predict(X_valid)['attention']
+            # attention_masks = model.predict(X_valid, batch_size=BATCH_SIZE)['attention']
 
-            masks_mean = []
-            masks_stds = []
+            # masks_mean = []
+            # masks_stds = []
 
-            for gest in np.unique(yf_vl):
-                attention_masks_gest = attention_masks[np.where(yf_vl == gest)[0]]
-                masks_mean.append(attention_masks_gest.mean(axis=(0, 1)))
-                masks_stds.append(attention_masks_gest.std(axis=(0, 1)))
+            # for gest in np.unique(yf_vl):
+            #     attention_masks_gest = attention_masks[np.where(yf_vl == gest)[0]]
+            #     masks_mean.append(attention_masks_gest.mean(axis=(0, 1)))
+            #     masks_stds.append(attention_masks_gest.std(axis=(0, 1)))
 
-            np.save(f'attention_masks/mask_{args.window_size}_fold{fold_idx}_{args.channels}.npy', np.array(masks_mean))
-            np.save(f'attention_masks/mask_std_{args.window_size}_fold{fold_idx}_{args.channels}.npy', np.array(masks_stds))
+            # np.save(f'attention_masks/mask_{args.window_size}_fold{fold_idx}_{args.channels}.npy', np.array(masks_mean))
+            # np.save(f'attention_masks/mask_std_{args.window_size}_fold{fold_idx}_{args.channels}.npy', np.array(masks_stds))
 
             # Сохранение матрицы ошибок и отчета
             with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as tmp:

@@ -1,12 +1,20 @@
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+import pandas as pd
 import numpy as np
 import json
 import scipy.io
 import random
-import os
+import os, sys
+from collections import defaultdict
+from typing import List, Dict, Any
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from config import GESTURE_INDEXES_MAIN, COM_PORTS
 
 
-def folder_extract(root_dir, exercises=["E2"], myo_pref="elbow"):
+def folder_extract(root_dir, exercises=["E2"]):
     """
     Purpose:
         Extract sEMG signals data from files beneath folder 'root_dir'(from args)
@@ -45,7 +53,7 @@ def folder_extract(root_dir, exercises=["E2"], myo_pref="elbow"):
     emg_label = []
     
     # Parse through sub folders underneath 'root_dir'(from args)
-    for folder in os.listdir(root_dir):
+    for folder in tqdm(os.listdir(root_dir)):
         subfolder_dir = root_dir + "/" + folder
         # Parse through .mat files underneath sub folders
         for file in os.listdir(subfolder_dir):
@@ -55,16 +63,8 @@ def folder_extract(root_dir, exercises=["E2"], myo_pref="elbow"):
                 # Read .mat file
                 mat = scipy.io.loadmat(file_path)
                 
-                # Get first 8 Myo sensors/channels closest to elbow
-                if myo_pref == "elbow":
-                    emg += [sensors[:8] for sensors in mat["emg"]]
-                # Get last 8 Myo sensors/channels closest to wrist
-                elif myo_pref == "wrist":
-                    emg += [sensors[8:] for sensors in mat["emg"]]
-                # Get all 16 Myo sensors/channels
-                else:
-                    emg += mat["emg"]
-                
+                emg += [sensors[:8] for sensors in mat["emg"]]
+
                 current_exercise = file.split("_")[1]
                 
                 if current_exercise == "E2":
@@ -97,45 +97,32 @@ def folder_extract(root_dir, exercises=["E2"], myo_pref="elbow"):
     
     return np.array(emg), np.array(emg_label)
 
-
-def folder_imu_extract(root_dir, exercises=["E2"], myo_pref="elbow"):
-    """Извлечение ЭМГ сигналов и данных с акселерометра
+def folder_extract_subject(root_dir: str, exercises: list=["E2"], subjects: list=['s1']) -> list:
+    """Извлекает серии ЭМГ сигналов для всех субъектов в списке subjects.
 
     Args:
-        root_dir (_type_): _description_
-        exercises (list, optional): _description_. Defaults to ["E2"].
-        myo_pref (str, optional): _description_. Defaults to "elbow".
+        root_dir (str): Корневая папка с датасетом.
+        exercises (list, optional): Номера упражнений (см. оригинальный датасет). Defaults to ["E2"].
+        subjects (list, optional): Номера активных субъектов. Defaults to ['s1'].
 
     Returns:
-        _type_: _description_
+        list: Список массивов ЭМГ сигналов и меток.
     """
-    
     emg = []
-    imu = []
     emg_label = []
+    files_lst = os.listdir(root_dir)                                    # Список файлов
+    files_lst = [file for file in files_lst if file in subjects]    # Выделение только необходимых пользователей
+    files_lst = sorted(files_lst, key=lambda x: int(x[1:]))             # Сортировка названий
     
-    # Parse through sub folders underneath 'root_dir'(from args)
-    for folder in os.listdir(root_dir):
-        subfolder_dir = root_dir + "/" + folder
-        # Parse through .mat files underneath sub folders
-        for file in os.listdir(subfolder_dir):
-            # Get sEMG signals of dedicated Myo armband and Exercise
+    for folder in tqdm(files_lst, desc=f'Извлечение сигналов для {subjects}'):
+        subfolder_dir = root_dir + "/" + folder    # Определение субдиректории с пользователем
+        for file in os.listdir(subfolder_dir):     # Перебор всех пользователей
             if file.split("_")[1] in exercises:
                 file_path = subfolder_dir + "/" + file
-                # Read .mat file
-                mat = scipy.io.loadmat(file_path)
-                
-                # Get first 8 Myo sensors/channels closest to elbow
-                if myo_pref == "elbow":
-                    emg += [sensors[:8] for sensors in mat["emg"]]
-                    imu += [sensors for sensors in mat["acc"]]
-                # Get last 8 Myo sensors/channels closest to wrist
-                elif myo_pref == "wrist":
-                    emg += [sensors[8:] for sensors in mat["emg"]]
-                # Get all 16 Myo sensors/channels
-                else:
-                    emg += mat["emg"]
-                
+
+                mat = scipy.io.loadmat(file_path)                 # Чтение .mat
+                emg += [sensors[:8] for sensors in mat["emg"]]    # ! Извлечение сырых сигналов
+
                 current_exercise = file.split("_")[1]
                 
                 if current_exercise == "E2":
@@ -144,7 +131,7 @@ def folder_imu_extract(root_dir, exercises=["E2"], myo_pref="elbow"):
                     
                     for label in labels:
                         if label != 0:
-                            new_labels.append(label + 12)
+                            new_labels.append(label + 12)    # Увеличение индекса для соответсвия таблице
                         else:
                             new_labels.append(0)
                     
@@ -156,17 +143,104 @@ def folder_imu_extract(root_dir, exercises=["E2"], myo_pref="elbow"):
                     
                     for label in labels:
                         if label != 0:
-                            new_labels.append(label + 29)
+                            new_labels.append(label + 29)    # Увеличение индекса для соответсвия таблице
                         else:
                             new_labels.append(0)
-                    
                     emg_label.extend(new_labels)
-                
+
                 else:
-                    # Collect corresponding labels
                     emg_label.extend(mat["stimulus"].reshape(-1))
     
-    return np.array(emg), np.array(imu), np.array(emg_label)
+    return np.array(emg), np.array(emg_label)
+
+def recordings_extract(root_dir: str="../dataset_unified", trials: list=["1", "2", "3"], 
+                       gestures: list=GESTURE_INDEXES_MAIN, COM_ports: list=COM_PORTS, subjects: list=["S1"]) -> tuple:
+    """Извлечение данных из .csv файлов с директории dataset_unified
+    
+    Args:
+        root_dir (str, опционально): Корневая папка датасета. По умолчанию: "../dataset_unified".
+        trials (list, опционально): Индекс запуска. 1 - слабые усилия, 2 - средние, 3 - сильные. По умолчанию: ["1", "2", "3"].
+        gestures (list, опционально): Индексы жестов. См. документацию. По умолчанию: [0, 13, 15, 18, 19, 34, 38, 43, 46]
+        subjects (list, опционально): Индекс субъектов. По умолчанию ["S1"].
+
+    Returns:
+        tuple: Кортеж массивов np.ndarray: 
+        1-й массив - ЭМГ сигналы размерностью (n, c), где n - суммарное кол-во точек, c - количество каналов;
+        2-й массив - метки классов, размерностью (n, ).
+    """
+    files = [s for s in sorted(os.listdir(root_dir)) if (s.startswith("S")) and ("table" not in s)]    # Все файлы .csv с сигналами
+    filtered_columns = ["EMG_FILTERED_" + com for com in COM_ports]                                    # Названия колонок с отфильтрованными ЭМГ
+    
+    emgs = []
+    labels = []
+
+    files_missed = []    # Файлы, в которых пропущены колонки из-за ошибки
+
+    for gest in tqdm(GESTURE_INDEXES_MAIN):
+        for s in subjects:
+            for trial in trials:
+                file_result = [file for file in files if f"{s}_{gest}_{trial}" in file][0]             # Искомое название файла
+                df_main = pd.read_csv(root_dir + file_result, comment="#").dropna()                    # .csv с сериями ЭМГ                    
+
+                try:                                                      # Обработчик исключений на наличие колонок filtered_columns в датасете
+                    df_filtered = df_main[filtered_columns].iloc[500:]    # Обрезанные и отфильтрованные сигналы
+                except:
+                    files_missed.append(file_result)
+                    continue
+
+                emgs.extend(df_filtered.to_numpy())
+                labels.extend([gest]*df_filtered.shape[0])
+    
+    print(f"Skippped dataframes: {files_missed}")
+
+    return np.asarray(emgs), np.asarray(labels)
+
+
+def data2gestdict(emgs: np.ndarray, labels: np.ndarray) -> Dict[int, list]:    # NOTE: Для несбалансированных классов можно добавить thrs/relax_shrink
+    """Переводит массивы ЭМГ сигналов и меток классов жестов в словарь.
+
+    Args:
+        emgs (np.ndarray): N-мерный массив ЭМГ сигналов, где N - количество каналов.
+        labels (np.ndarray): Одномерный массив меток.
+
+    Returns:
+        dict: `{0: [...], 1: [...], 2: [...], ...}`, где ключи - индекс жестов, значения - списки массивов np.ndarray.
+    """
+    unique_labels = np.unique(labels)    # Уникальные метки жестов
+    gesture_dict = defaultdict(list)
+
+    label_indexes = np.where(labels == unique_labels[1])
+
+    for label_i in unique_labels:
+        label_indexes = np.where(labels == label_i)          # Индексы меток i в labels
+        gesture_dict[label_i].extend(emgs[label_indexes])    # Добавление в список ЭМГ сигналов с индексами label_indexes
+        
+    return gesture_dict
+
+
+def train_test_split(gestures: dict, split_size: float=0.25, rand_seed: int=42) -> List[Dict[int, list]]:
+    """Разделяет данные на тренировочные и тестовые.
+
+    Args:
+        gestures (dict): Общий словарь жестов.
+        split_size (float, optional): Размер тестовой выборки. По умолчанию: 0.25.
+        rand_seed (int, optional): Случайный seed. По умолчанию: 42.
+
+    Returns:
+        List[Dict[int, list]]: Список двух словарей с тренировочной и тестовой выборкой соответственно. 
+    """
+    train_gestures = {key:None for key in gestures}
+    test_gestures = {key:None for key in gestures}
+    
+    for _, (label, signals) in enumerate(gestures.items()):
+        random.Random(rand_seed).shuffle(signals)    # Перемешать индексы
+        
+        threshold = int(len(signals) * split_size)
+        
+        train_gestures[label] = signals[threshold:]
+        test_gestures[label] = signals[:threshold]
+    
+    return train_gestures, test_gestures
 
 
 def standarization(emg, save_path=None):
@@ -275,102 +349,6 @@ def gestures(emg, label, targets=[0, 1, 3, 6],
         gestures[0] = random.sample(gestures[0], relax_shrink)
     
     return gestures
-
-
-def plot_distribution(gestures):
-    """
-    Purpose:
-        Plot distribution of number of gesture samples in pie chart.
-
-    Args:
-        1. gestures (dict):
-            (Output of function "gestures")
-            
-            - Dictionary with: 
-                - key: gesture/label
-                - values: array of sEMG sigals corresponding to the gesture/label
-            
-            
-            - Structure:
-                {
-                    0 (gesture/label) : [...] (sEMG samples of dedicated gesture/label)
-                    1 (gesture/label) : [...] (sEMG samples of dedicated gesture/label)
-                    ...
-                }
-    """
-    labels = []
-    for _, (label, signals) in enumerate(gestures.items()):
-        signals = np.array(signals)
-        labels += [label for _ in range(len(signals))]
-        
-    unique, counts = np.unique(labels, return_counts=True)
-    
-    plt.figure(figsize=(20, 6))
-    plt.pie(counts, labels = unique, autopct='%1.0f%%')
-    plt.show()
-    
-    
-def train_test_split(gestures, split_size=0.25, rand_seed=2022):
-    """
-    Purpose:
-        Perform train test split
-
-    Args:
-        1. gestures (dict):
-            (Output of function "gestures")
-            
-            - Dictionary with:
-                - key: gesture/label
-                - values: array of sEMG sigals corresponding to the gesture/label
-            - Structure:
-                {
-                    0 (gesture/label) : [...] (sEMG samples of dedicated gesture/label)
-                    1 (gesture/label) : [...] (sEMG samples of dedicated gesture/label)
-                    ...
-                }
-                
-        2. split_size (float, optional):
-            Split size, 0.25 refers to 25% test samples, 75% train samples. Defaults to 0.25.
-            
-        3. rand_seed (int, optional):
-            Random seed for random shuffling reproducibility. Defaults to 2022.
-
-    Returns:
-        1. train_gestures (dict):
-            - Dictionary with:
-                - key: gesture/label for TRAINING set
-                - values: array of sEMG sigals corresponding to the gesture/label
-            - Structure:
-                {
-                    0 (gesture/label) : [...] (sEMG samples of dedicated gesture/label)
-                    1 (gesture/label) : [...] (sEMG samples of dedicated gesture/label)
-                    ...
-                }
-                
-        2. test_gestures (dict): 
-            - Dictionary with:
-                - key: gesture/label for TESTING set
-                - values: array of sEMG sigals corresponding to the gesture/label
-            - Structure:
-                {
-                    0 (gesture/label) : [...] (sEMG samples of dedicated gesture/label)
-                    1 (gesture/label) : [...] (sEMG samples of dedicated gesture/label)
-                    ...
-                }
-    """
-    train_gestures = {key:None for key in gestures}
-    test_gestures = {key:None for key in gestures}
-    
-    # Shuffle sEMG data and split to training and testing set
-    for _, (label, signals) in enumerate(gestures.items()):
-        random.Random(rand_seed).shuffle(signals)
-        
-        threshold = int(len(signals) * split_size)
-        
-        train_gestures[label] = signals[threshold:]
-        test_gestures[label] = signals[:threshold]
-    
-    return train_gestures, test_gestures
     
     
 def apply_window(gestures, window=32, step=16):

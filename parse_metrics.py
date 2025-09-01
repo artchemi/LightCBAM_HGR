@@ -41,19 +41,19 @@ def average_metric_for_experiment(experiment_name: str, metric_key: str):
 
 # Пример использования
 if __name__ == "__main__":
-    col_name_accuracy = "validation_softmax_accuracy"
+    col_name_accuracy = "validation_accuracy"
     col_name_f1 = "valid_f1"
     col_name_complexity = "complexity_mflops"
-    model = 'CAM'
+    model = 'attention'
 
-    window_sizes = np.arange(24, 101, 4)
+    window_sizes = np.arange(60, 260, 10)
     metrics_dict = defaultdict(list)
     metrics_dict['window_size'] = window_sizes
 
     for i in window_sizes:
-        df_accuracy, _ = average_metric_for_experiment(f"Win{i}|{model}|reduced", col_name_accuracy)
-        df_f1, _ = average_metric_for_experiment(f"Win{i}|{model}|reduced", col_name_f1)
-        df_complexity, _ = average_metric_for_experiment(f"Win{i}|{model}|reduced", col_name_complexity)
+        df_accuracy, _ = average_metric_for_experiment(f"Win{i}|{model}", col_name_accuracy)
+        df_f1, _ = average_metric_for_experiment(f"Win{i}|{model}", col_name_f1)
+        df_complexity, _ = average_metric_for_experiment(f"Win{i}|{model}", col_name_complexity)
 
         metrics_dict['accuracy_mean'].append(df_accuracy[col_name_accuracy].mean() * 100)
         metrics_dict['accuracy_std'].append(df_accuracy[col_name_accuracy].std() * 100)
@@ -64,4 +64,4 @@ if __name__ == "__main__":
         metrics_dict[col_name_complexity].append(df_complexity[col_name_complexity].iloc[0])
 
     df_metrics = pd.DataFrame(metrics_dict)
-    df_metrics.to_csv(f'metrics_{model}.csv', index=False)
+    df_metrics.to_csv(f'metrics_{model}_wowwise.csv', index=False)

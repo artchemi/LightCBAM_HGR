@@ -13,7 +13,7 @@ from keras_flops import get_flops
 # Корень проекта
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models import build_base_model, build_SAM_model
-from dataset import folder_extract, gestures, train_test_split, apply_window
+from dataset import recordings_extract, data2gestdict, train_test_split, apply_window
 from config import *
 from utils import set_seed, evaluate_metrics
 
@@ -31,7 +31,6 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('--window_size', type=int, default=WINDOW_SIZE)
     p.add_argument('--model', type=str, default='base', choices=['base', 'attention'])
-    p.add_argument('--channels', type=str, default='full', choices=['full', 'reduced'])
     p.add_argument('--step_size', type=int, default=STEP_SIZE)    # Расстояние между окнами
     return p.parse_args()
 
@@ -74,21 +73,19 @@ def train_model(model: tf.keras.Sequential, epochs: int, X_train: np.ndarray, y_
 def main():
     args = parse_args()
     mlflow.tensorflow.autolog()
-    mlflow.set_experiment(f"Win{args.window_size}|{args.model}|{args.channels}")
+    mlflow.set_experiment(f"Win{args.window_size}|{args.model}")
 
-    # Сырые сигналы и метки
-    emg, label = folder_extract(FOLDER_PATH, exercises=EXERCISES, myo_pref=MYO_PREF)
-    all_g = gestures(emg, label, targets=GESTURE_INDEXES_MAIN)
+    emgs, labels = recordings_extract(root_dir="dataset_unified/", subjects=["S1", "S2", "S3", "S4", "S5"],
+                                      trials=["2", "3"])    # Сырые сигналы и метки классов
+    gestures = data2gestdict(emgs, labels)
 
-    # Train/Test split по жестам
-    train_g, test_g = train_test_split(all_g, split_size=0.2, rand_seed=GLOBAL_SEED)
+    train_g, _ = train_test_split(gestures=gestures, split_size=0.2)    # Разделение данных 
 
-    # Преобразование в окна: [N, channels, window]
-    X_train_raw, y_train = apply_window(train_g, window=args.window_size, step=STEP_SIZE)
-    X_test_raw,  y_test  = apply_window(test_g,  window=args.window_size, step=STEP_SIZE)
+    X_train_raw, y_train = apply_window(train_g, window=args.window_size, step=STEP_SIZE * 10)    # Преобразование в окна: [N, channels, window]
+    # X_test_raw,  y_test  = apply_window(test_g,  window=args.window_size, step=STEP_SIZE * 10)
 
     # Каналы для режима и форма входа
-    channels = CHANNELS if args.channels == 'reduced' else list(range(8))
+    channels = CHANNELS
     input_shape = (args.window_size, len(channels), 1)
 
     # Папка для сохранения параметров стандартизации
@@ -107,7 +104,7 @@ def main():
 
         # Сохраняем эти параметры в JSON
         params = {'mean': means.tolist(), 'std':  stds.tolist()}
-        norm_file = f'normalization_values/fold{fold_idx}_win{args.window_size}_{args.model}_{args.channels}.json'
+        norm_file = f'normalization_values/fold{fold_idx}_win{args.window_size}_{args.model}.json'
         with open(norm_file, 'w') as f:
             json.dump(params, f)
 
@@ -138,7 +135,7 @@ def main():
         mflops = get_flops(model, batch_size=1) / 1e6
         print(f"Model MFLOPS: {mflops:.2f}")
 
-        save_w = SAVE_PATH + f'_fold{fold_idx}_{args.window_size}_{args.model}_{args.channels}.h5'
+        save_w = SAVE_PATH + f'_fold{fold_idx}_{args.window_size}_{args.model}.h5'
         with mlflow.start_run(run_name=f'fold_{fold_idx}'):
             # Обучение
             train_model(model, EPOCHS, X_train, yf_tr, X_valid, yf_vl, batch_size=BATCH_SIZE, lr=lr, save_path=save_w)

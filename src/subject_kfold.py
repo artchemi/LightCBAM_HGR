@@ -12,19 +12,17 @@ from keras_flops import get_flops
 
 # Корень проекта
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from models import build_base_model, build_SAM_model
-from dataset import folder_extract, folder_imu_extract, gestures, train_test_split, apply_window
+from models import build_base_model, build_SAM_model, build_CAM_model_1D
+from dataset import folder_extract_subject, gestures, train_test_split, apply_window
 from config import *
 from utils import set_seed, evaluate_metrics
 
 
 set_seed(seed=GLOBAL_SEED)
 
-gpus = tf.config.list_physical_devices('GPU')
-if gpus:
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-
+physical_devices = tf.config.list_physical_devices('GPU')
+if physical_devices:
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
 tf.get_logger().setLevel('INFO')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
@@ -32,7 +30,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('--window_size', type=int, default=WINDOW_SIZE)
-    p.add_argument('--model', type=str, default='early_fusion', choices=['early_fusion', 'attention_fusion'])
+    p.add_argument('--model', type=str, default='base', choices=['base', 'SAM'])
     p.add_argument('--channels', type=str, default='full', choices=['full', 'reduced'])
     p.add_argument('--step_size', type=int, default=STEP_SIZE)    # Расстояние между окнами
     return p.parse_args()
@@ -76,96 +74,82 @@ def train_model(model: tf.keras.Sequential, epochs: int, X_train: np.ndarray, y_
 def main():
     args = parse_args()
     mlflow.tensorflow.autolog()
-    mlflow.set_experiment(f"Win{args.window_size}|{args.model}|{args.channels}")
+    mlflow.set_experiment(f"Win{args.window_size}|{args.model}|{args.channels}|subjects")
 
-    # Сырые сигналы (ЭМГ + акселерометр) и метки
-    emg, imu, label = folder_imu_extract(FOLDER_PATH, exercises=EXERCISES, myo_pref=MYO_PREF)
-    data = np.concatenate([emg, imu], axis=1)
+    subjects = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10', 's11']
 
-    all_g = gestures(data, label, targets=GESTURE_INDEXES_MAIN)
+    for subject in subjects:    # Перебор всех субъектов    
+        subjects_copy = subjects.copy()
+        subjects_copy.remove(subject)    # Субъекты для тренировочной выборки 
 
-    # Train/Test split по жестам
-    train_g, _ = train_test_split(all_g, split_size=0.0, rand_seed=GLOBAL_SEED)
+        emg_train, label_train = folder_extract_subject(root_dir=FOLDER_PATH, exercises=EXERCISES, subjects=subjects_copy)    # Сырые сигналы
+        emg_test, label_test = folder_extract_subject(root_dir=FOLDER_PATH, exercises=EXERCISES, subjects=[subject])  
 
-    # Преобразование в окна: [N, channels, window]
-    X_train_raw, y_train = apply_window(train_g, window=args.window_size, step=STEP_SIZE)
-    # X_test_raw,  y_test  = apply_window(test_g,  window=args.window_size, step=STEP_SIZE)
+        all_gestures_train = gestures(emg_train, label_train, targets=GESTURE_INDEXES_MAIN)    
+        all_gestures_test = gestures(emg_test, label_test, targets=GESTURE_INDEXES_MAIN)
 
+        train_gestures, _ = train_test_split(all_gestures_train, split_size=0.0, rand_seed=GLOBAL_SEED)    # Разбиение на выборки 
+        _, test_gestures = train_test_split(all_gestures_test, split_size=1.0, rand_seed=GLOBAL_SEED)
 
-    # Каналы для режима и форма входа 
-    channels = CHANNELS if args.channels == 'reduced' else list(range(X_train_raw.shape[1]))
-    input_shape = (args.window_size, len(channels), 1)    # FIXME: Адаптировать этот код по мультимодальные данные
+        X_train_raw, y_train = apply_window(train_gestures, window=args.window_size, step=STEP_SIZE * 10)    # Разбиение на окна
+        X_test_raw, y_test = apply_window(test_gestures, window=args.window_size, step=STEP_SIZE * 10)       #? Какой ставить размер окна
 
-    # Папка для сохранения параметров стандартизации
-    os.makedirs('normalization_values', exist_ok=True)
+        channels = CHANNELS if args.channels == 'reduced' else list(range(8))    # Активные каналы
+        input_shape = (args.window_size, len(channels), 1)                       # Размерность входного окна
 
-    # Кросс-валидация по фолдам
-    kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=GLOBAL_SEED)
-    for fold_idx, (idx_tr, idx_vl) in enumerate(kf.split(X_train_raw, y_train), start=1):
-        print(f"\n=== Fold {fold_idx} ===")
-        Xf_tr, yf_tr = X_train_raw[idx_tr], y_train[idx_tr]
-        Xf_vl, yf_vl = X_train_raw[idx_vl], y_train[idx_vl]
+        means = X_train_raw.mean(axis=(0, 2))          # Среднее
+        stds  = X_train_raw.std(axis=(0, 2)) + 1e-8    # Стандартное отклонение
 
-        # Считаем mean/std по тренировочным данным (оси 0 и 2)
-        means = Xf_tr.mean(axis=(0, 2))       # (channels,)
-        stds  = Xf_tr.std(axis=(0, 2)) + 1e-8
-
-        # Сохраняем эти параметры в JSON
-        params = {'mean': means.tolist(), 'std':  stds.tolist()}
-        norm_file = f'normalization_values/fold{fold_idx}_win{args.window_size}_{args.model}_{args.channels}.json'
-        with open(norm_file, 'w') as f:
-            json.dump(params, f)
-
-        # Стандартизируем raw-окна
+        #* Предобработка 
         def standardize(X):
             return (X - means[None,:,None]) / stds[None,:,None]
+        
+        X_train = standardize(X_train_raw)
+        X_test = standardize(X_test_raw)
 
-        Xs_tr = standardize(Xf_tr)
-        Xs_vl = standardize(Xf_vl)
-
-        # Переводим в [N, window, channels, 1]
         def prepare(X):
             Xt = np.transpose(X, (0, 2, 1))   # [N, window, channels]
             sel = Xt[..., channels]           # отбор каналов
             return sel[..., np.newaxis].astype(np.float32)
+        
+        X_train = prepare(X_train)
+        X_test = prepare(X_test)
 
-        X_train = prepare(Xs_tr)
-        X_valid = prepare(Xs_vl)
-
-        # Выбор модели
-        if args.model == 'early_fusion':
+        #* Выбор модели
+        if args.model == 'base':
             model = build_base_model(input_shape, FILTERS_BASE, KERNEL_SIZE_BASE, POOL_SIZE_BASE, P_DROPOUT_BASE, NUM_CLASSES)
-            lr = INIT_LR
-        else:
+            lr = INIT_LR * 1e-2
+        elif args.model == 'SAM':
             model = build_SAM_model(input_shape, FILTERS_BASE, KERNEL_SIZE_BASE, POOL_SIZE_BASE, P_DROPOUT_BASE, NUM_CLASSES)
             lr = 1e-2    # Для модели с механизмом внимания надо выбирать скорость обучения ниже бейзлайна 
+        elif args.model == 'CAM':
+            model = build_CAM_model_1D(input_shape, return_attention_mask=True)
+            lr = 1e-2 
+        else: 
+            sys.exit(0)
 
-        mflops = get_flops(model, batch_size=1) / 1e6
-        print(f"Model MFLOPS: {mflops:.2f}")
+        save_w = SAVE_PATH + f'_subject{subject}_{args.window_size}_{args.model}_{args.channels}.h5'
 
-        save_w = SAVE_PATH + f'_fold{fold_idx}_{args.window_size}_{args.model}_{args.channels}.h5'
-        with mlflow.start_run(run_name=f'fold_{fold_idx}'):
-            # Обучение
-            train_model(model, EPOCHS, X_train, yf_tr, X_valid, yf_vl, batch_size=BATCH_SIZE, lr=lr, save_path=save_w)
-            # Инференс
+        with mlflow.start_run(run_name=f'subject {subject}'):
+            train_model(model, EPOCHS, X_train=X_train, y_train=y_train, X_valid=X_test, y_valid=y_test, batch_size=BATCH_SIZE, lr=lr, save_path=save_w)
             model.load_weights(save_w)
-            _, val_acc = model.evaluate(X_valid, yf_vl, batch_size=BATCH_SIZE, verbose=0)
-            f1, report_dict, cm_df = evaluate_metrics(model, X_valid, yf_vl)
 
-            mlflow.log_metric('valid_accuracy', float(val_acc))
-            mlflow.log_metric('valid_f1', float(f1))
-            mlflow.log_metric('complexity_mflops', float(mflops))
+            _, test_acc = model.evaluate(X_test, y_test, batch_size=BATCH_SIZE, verbose=0)
+            f1, report_dict, cm_df = evaluate_metrics(model, X_test, y_test)    #! Надо переписать тестирование и добавить новую метрику
 
-            # Сохранение матрицы ошибок и отчета
+            #* Логирование результатов
+            mlflow.log_metric('test_accuracy', float(test_acc))
+            mlflow.log_metric('test_f1', float(f1))
+
             with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as tmp:
                 cm_df.to_csv(tmp.name)
                 mlflow.log_artifact(tmp.name, 'confusion_matrix')
-            mlflow.log_dict(report_dict, 'classification_report_valid.json')
+
+            mlflow.log_dict(report_dict, 'classification_report_test.json')
             mlflow.log_param('gesture_indexes', GESTURE_INDEXES_MAIN)
             mlflow.log_param('channels', channels)
 
         tf.keras.backend.clear_session()
-
 
 if __name__ == '__main__':
     main()
